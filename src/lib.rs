@@ -11,13 +11,13 @@ pub fn unpack(packet: &[u8]) -> IoResult<&str> {
     let zlib_magic: &[u8] = &[0x78, 0x01]; // @todo - Match all compression levels.
 
     if gzip_magic == magic_bytes {
-        return unpack_gzip(packet);
+        unpack_gzip(packet)
     } else if zlib_magic == magic_bytes {
-        return unpack_zlib(packet);
+        unpack_zlib(packet)
     } else if chunk_magic == magic_bytes {
-        return unpack_chunk(packet);
+        unpack_chunk(packet)
     } else {
-        return unpack_uncompressed(packet);
+        unpack_uncompressed(packet)
     }
 }
 
