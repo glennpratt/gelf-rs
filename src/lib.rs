@@ -56,7 +56,7 @@ fn unpack_uncompressed(packet: &[u8]) -> IoResult<&str> {
 
 #[test]
 fn test_unpack_with_uncompressed() {
-    let json = r#"{\"message\":\"foo\",\"host\":\"bar\",\"_lol_utf8\":\"\u00FC\"}"#;
+    let json = r#"{message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
     let packet = json.clone().as_bytes();
     
     assert_eq!(json, unpack(packet).unwrap());
@@ -64,7 +64,7 @@ fn test_unpack_with_uncompressed() {
 
 #[test]
 fn test_unpack_with_gzip() {
-    let json = r#"{\"message\":\"foo\",\"host\":\"bar\",\"_lol_utf8\":\"\u00FC\"}"#;
+    let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
     let rdr = BufReader::new(json.as_bytes());
     let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
 
@@ -73,7 +73,7 @@ fn test_unpack_with_gzip() {
 
 #[test]
 fn test_unpack_with_zlib() {
-    let json = r#"{\"message\":\"foo\",\"host\":\"bar\",\"_lol_utf8\":\"\u00FC\"}"#;
+    let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
     let rdr = BufReader::new(json.as_bytes());
     let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
 
