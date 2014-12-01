@@ -1,8 +1,10 @@
+#![feature(globs)]
+
 extern crate flate2;
 
+use flate2::FlateReader;
 use std::io;
 use std::io::{BufReader, IoResult, IoError};
-use flate2::{FlateReader, CompressionLevel};
 
 pub fn unpack(packet: &[u8]) -> IoResult<&str> {
     let magic_bytes = packet.slice_to(2);
@@ -30,15 +32,15 @@ fn unpack_chunk(_: &[u8]) -> IoResult<&str> {
 }
 
 fn unpack_gzip(packet: &[u8]) -> IoResult<&str> {
-    let reader = BufReader::new(packet);
-    let bytes = try!(reader.gz_decode().read_to_end());
+    let mut reader = BufReader::new(packet).gz_decode();
+    let bytes = try!(reader.read_to_end());
     // @todo - why do I need clone here?
     unpack_uncompressed(bytes.as_slice().clone())
 }
 
 fn unpack_zlib(packet: &[u8]) -> IoResult<&str> {
-    let reader = BufReader::new(packet);
-    let bytes = try!(reader.zlib_decode().read_to_end());
+    let mut reader = BufReader::new(packet).zlib_decode();
+    let bytes = try!(reader.read_to_end());
     // @todo - why do I need clone here?
     unpack_uncompressed(bytes.as_slice().clone())
 }
@@ -54,28 +56,78 @@ fn unpack_uncompressed(packet: &[u8]) -> IoResult<&str> {
     }
 }
 
-#[test]
-fn test_unpack_with_uncompressed() {
-    let json = r#"{message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
-    let packet = json.clone().as_bytes();
-    
-    assert_eq!(json, unpack(packet).unwrap());
+#[cfg(test)]
+mod test {
+    use unpack;
+    use flate2::{FlateReader, CompressionLevel};
+    use std::io::{BufReader};
+
+    #[test]
+    fn unpack_with_uncompressed() {
+        let json = r#"{message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
+        let packet = json.clone().as_bytes();
+
+        assert_eq!(json, unpack(packet).unwrap());
+    }
+
+    #[test]
+    fn unpack_with_gzip() {
+        let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
+        let rdr = BufReader::new(json.as_bytes());
+        let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
+
+        assert_eq!(json, unpack(byte_vec.as_slice()).unwrap());
+    }
+
+    #[test]
+    fn unpack_with_zlib() {
+        let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
+        let rdr = BufReader::new(json.as_bytes());
+        let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
+
+        assert_eq!(json, unpack(byte_vec.as_slice()).unwrap());
+    }
 }
 
-#[test]
-fn test_unpack_with_gzip() {
-    let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
-    let rdr = BufReader::new(json.as_bytes());
-    let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
+#[cfg(test)]
+mod test_udp_receiver {
+    use unpack;
+    use std::io::net::udp::*;
+    use std::prelude::*;
+    use std::io::test::*;
 
-    assert_eq!(json, unpack(byte_vec.as_slice()).unwrap());
-}
+    #[test]
+    fn udp_receiver_smoke_test() {
+        let server_ip = next_test_ip4();
+        let client_ip = next_test_ip4();
+        let (tx1, rx1) = channel();
+        let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
 
-#[test]
-fn test_unpack_with_zlib() {
-    let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
-    let rdr = BufReader::new(json.as_bytes());
-    let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
+        spawn(proc() {
+            match UdpSocket::bind(client_ip) {
+                Ok(ref mut client) => {
+                    rx1.recv(); // Wait for signal main thread is listening.
+                    client.send_to(json.as_bytes(), server_ip).unwrap()
+                }
+                Err(..) => panic!()
+            }
+        });
 
-    assert_eq!(json, unpack(byte_vec.as_slice()).unwrap());
+        match UdpSocket::bind(server_ip) {
+            Ok(ref mut server) => {
+                tx1.send(());
+
+                // From gelfclient... CHUNK_MAGIC_BYTES(2) + messageId(8) + sequenceNumber(1) + sequenceCount(1) + MAX_CHUNK_SIZE(1420)
+                let mut buf = [0, ..1432];
+                match server.recv_from(&mut buf) {
+                    Ok((n_read, src)) => {
+                        assert_eq!(json, unpack(buf.as_slice().slice_to(n_read)).unwrap());
+                        assert_eq!(src, client_ip);
+                    }
+                    Err(..) => panic!()
+                }
+            }
+            Err(..) => panic!()
+        }
+    }
 }
