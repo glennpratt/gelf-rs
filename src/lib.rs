@@ -64,7 +64,7 @@ mod test {
 
     #[test]
     fn unpack_with_uncompressed() {
-        let json = r#"{message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
+        let json = r#"{message":"foo","host":"bar","_utf8":"✓"}"#;
         let packet = json.clone().as_bytes();
 
         assert_eq!(json, unpack(packet).unwrap());
@@ -72,7 +72,7 @@ mod test {
 
     #[test]
     fn unpack_with_gzip() {
-        let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
+        let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
         let rdr = BufReader::new(json.as_bytes());
         let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
 
@@ -81,7 +81,7 @@ mod test {
 
     #[test]
     fn unpack_with_zlib() {
-        let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
+        let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
         let rdr = BufReader::new(json.as_bytes());
         let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
 
@@ -101,7 +101,7 @@ mod test_udp_receiver {
         let server_ip = next_test_ip4();
         let client_ip = next_test_ip4();
         let (tx1, rx1) = channel();
-        let json = r#"{"message":"foo","host":"bar","_lol_utf8":"\u00FC"}"#;
+        let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
 
         spawn(proc() {
             match UdpSocket::bind(client_ip) {
