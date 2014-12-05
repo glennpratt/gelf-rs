@@ -3,9 +3,29 @@ use std::str;
 use std::io;
 use std::io::{BufReader, IoResult, IoError};
 
-pub fn unpack(packet: &[u8]) -> IoResult<&str> {
+pub use self::chunk::Chunk;
+pub use self::Payload::*;
+
+pub mod chunk;
+
+pub enum Payload {
+  Complete(String),
+  Partial(Chunk)
+}
+
+pub fn unpack_packet(packet: &[u8]) -> IoResult<Payload> {
+  let magic_bytes = packet.slice_to(2);
+  let chunk_magic: &[u8] = &[0x1e, 0x0f];
+
+  if chunk_magic == magic_bytes {
+    Ok(Partial(try!(unpack_chunk(packet))))
+  } else {
+    Ok(Complete(try!(unpack(packet))))
+  }
+}
+
+pub fn unpack(packet: &[u8]) -> IoResult<String> {
     let magic_bytes = packet.slice_to(2);
-    let chunk_magic: &[u8] = &[0x1e, 0x0f];
     let gzip_magic: &[u8] = &[0x1f, 0x8b];
     let zlib_magic: &[u8] = &[0x78, 0x01]; // @todo - Match all compression levels.
 
@@ -13,14 +33,12 @@ pub fn unpack(packet: &[u8]) -> IoResult<&str> {
         unpack_gzip(packet)
     } else if zlib_magic == magic_bytes {
         unpack_zlib(packet)
-    } else if chunk_magic == magic_bytes {
-        unpack_chunk(packet)
     } else {
         unpack_uncompressed(packet)
     }
 }
 
-fn unpack_chunk(_: &[u8]) -> IoResult<&str> {
+fn unpack_chunk(_: &[u8]) -> IoResult<Chunk> {
     Err(IoError {
         kind: io::InvalidInput,
         desc: "Unsupported GELF: Chunked packets are not supported yet.",
@@ -28,23 +46,21 @@ fn unpack_chunk(_: &[u8]) -> IoResult<&str> {
     })
 }
 
-fn unpack_gzip(packet: &[u8]) -> IoResult<&str> {
+fn unpack_gzip(packet: &[u8]) -> IoResult<String> {
     let mut reader = BufReader::new(packet).gz_decode();
     let bytes = try!(reader.read_to_end());
-    // @todo - why do I need clone here?
     unpack_uncompressed(bytes.as_slice().clone())
 }
 
-fn unpack_zlib(packet: &[u8]) -> IoResult<&str> {
+fn unpack_zlib(packet: &[u8]) -> IoResult<String> {
     let mut reader = BufReader::new(packet).zlib_decode();
     let bytes = try!(reader.read_to_end());
-    // @todo - why do I need clone here?
     unpack_uncompressed(bytes.as_slice().clone())
 }
 
-fn unpack_uncompressed(packet: &[u8]) -> IoResult<&str> {
+fn unpack_uncompressed(packet: &[u8]) -> IoResult<String> {
     match str::from_utf8(packet) {
-        Some(payload) => Ok(payload),
+        Some(payload) => Ok(payload.to_string()),
         None => Err(IoError {
             kind: io::InvalidInput,
             desc: "Unsupported GELF: Unknown, non-UTF8 payload.",
@@ -64,7 +80,7 @@ mod test {
         let json = r#"{message":"foo","host":"bar","_utf8":"✓"}"#;
         let packet = json.clone().as_bytes();
 
-        assert_eq!(json, unpack(packet).unwrap());
+        assert_eq!(json, unpack(packet).unwrap().as_slice());
     }
 
     #[test]
@@ -73,7 +89,7 @@ mod test {
         let rdr = BufReader::new(json.as_bytes());
         let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
 
-        assert_eq!(json, unpack(byte_vec.as_slice()).unwrap());
+        assert_eq!(json, unpack(byte_vec.as_slice()).unwrap().as_slice());
     }
 
     #[test]
@@ -82,7 +98,7 @@ mod test {
         let rdr = BufReader::new(json.as_bytes());
         let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
 
-        assert_eq!(json, unpack(byte_vec.as_slice()).unwrap());
+        assert_eq!(json, unpack(byte_vec.as_slice()).unwrap().as_slice());
     }
 }
 
@@ -118,7 +134,7 @@ mod test_udp_receiver {
                 let mut buf = [0, ..1432];
                 match server.recv_from(&mut buf) {
                     Ok((n_read, src)) => {
-                        assert_eq!(json, unpack(buf.as_slice().slice_to(n_read)).unwrap());
+                        assert_eq!(json, unpack(buf.as_slice().slice_to(n_read)).unwrap().as_slice());
                         assert_eq!(src, client_ip);
                     }
                     Err(..) => panic!()

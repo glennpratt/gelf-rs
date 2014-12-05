@@ -2,4 +2,4 @@
 
 extern crate flate2;
 
-pub mod parser;
+pub mod message;
