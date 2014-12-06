@@ -57,6 +57,9 @@ fn unpack_uncompressed(packet: &[u8]) -> IoResult<String> {
 
 #[cfg(test)]
 mod test {
+    extern crate test;
+
+    use self::test::Bencher;
     use super::*;
     use flate2::{FlateReader, CompressionLevel};
     use std::io::{BufReader};
@@ -85,6 +88,40 @@ mod test {
         let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
 
         assert_eq!(json, unpack(byte_vec.as_slice()).unwrap().as_slice());
+    }
+
+    #[test]
+    fn unpack_with_too_short() {
+        let bytes: &[u8] = &[0x1e];
+        bytes.slice_to(2);
+
+        unpack(bytes).unwrap().as_slice();
+    }
+
+    #[bench]
+    fn bench_uncompressed(b: &mut Bencher) {
+        let json = r#"{message":"foo","host":"bar","_utf8":"✓"}"#;
+        let packet = json.clone().as_bytes();
+
+        b.iter(|| unpack(packet));
+    }
+
+    #[bench]
+    fn bench_zlib(b: &mut Bencher) {
+        let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
+        let rdr = BufReader::new(json.as_bytes());
+        let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
+
+        b.iter(|| unpack(byte_vec.as_slice()));
+    }
+
+    #[bench]
+    fn bench_gzip(b: &mut Bencher) {
+        let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
+        let rdr = BufReader::new(json.as_bytes());
+        let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
+
+        b.iter(|| unpack(byte_vec.as_slice()));
     }
 }
 
