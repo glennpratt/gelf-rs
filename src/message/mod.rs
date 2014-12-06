@@ -9,19 +9,19 @@ pub use self::Payload::*;
 pub mod chunk;
 
 pub enum Payload {
-  Complete(String),
-  Partial(Chunk)
+    Complete(String),
+    Partial(Chunk)
 }
 
 pub fn unpack_packet(packet: &[u8]) -> IoResult<Payload> {
-  let magic_bytes = packet.slice_to(2);
-  let chunk_magic: &[u8] = &[0x1e, 0x0f];
+    let magic_bytes = packet.slice_to(2);
+    let chunk_magic: &[u8] = &[0x1e, 0x0f];
 
-  if chunk_magic == magic_bytes {
-    Ok(Partial(try!(unpack_chunk(packet))))
-  } else {
-    Ok(Complete(try!(unpack(packet))))
-  }
+    if chunk_magic == magic_bytes {
+        Ok(Partial(try!(Chunk::from_packet(packet))))
+    } else {
+        Ok(Complete(try!(unpack(packet))))
+    }
 }
 
 pub fn unpack(packet: &[u8]) -> IoResult<String> {
@@ -36,14 +36,6 @@ pub fn unpack(packet: &[u8]) -> IoResult<String> {
     } else {
         unpack_uncompressed(packet)
     }
-}
-
-fn unpack_chunk(_: &[u8]) -> IoResult<Chunk> {
-    Err(IoError {
-        kind: io::InvalidInput,
-        desc: "Unsupported GELF: Chunked packets are not supported yet.",
-        detail: None,
-    })
 }
 
 fn unpack_gzip(packet: &[u8]) -> IoResult<String> {
