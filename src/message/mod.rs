@@ -15,26 +15,20 @@ pub enum Payload {
 
 pub fn unpack_packet(packet: &[u8]) -> IoResult<Payload> {
     let magic_bytes = packet.slice_to(2);
-    let chunk_magic: &[u8] = &[0x1e, 0x0f];
 
-    if chunk_magic == magic_bytes {
-        Ok(Partial(try!(Chunk::from_packet(packet))))
-    } else {
-        Ok(Complete(try!(unpack(packet))))
+    match magic_bytes {
+        [0x1e, 0x0f] => Ok(Partial(try!(Chunk::from_packet(packet)))),
+        _ => Ok(Complete(try!(unpack(packet))))
     }
 }
 
 pub fn unpack(packet: &[u8]) -> IoResult<String> {
     let magic_bytes = packet.slice_to(2);
-    let gzip_magic: &[u8] = &[0x1f, 0x8b];
-    let zlib_magic: &[u8] = &[0x78, 0x01]; // @todo - Match all compression levels.
 
-    if gzip_magic == magic_bytes {
-        unpack_gzip(packet)
-    } else if zlib_magic == magic_bytes {
-        unpack_zlib(packet)
-    } else {
-        unpack_uncompressed(packet)
+    match magic_bytes {
+        [0x1f, 0x8b] => unpack_gzip(packet),
+        [0x78, 0x01] => unpack_zlib(packet), // @todo - Match all compression levels.
+        _ => unpack_uncompressed(packet)
     }
 }
 
