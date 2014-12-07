@@ -13,35 +13,22 @@ pub enum Payload {
     Partial(Chunk)
 }
 
-pub fn unpack_packet(packet: &[u8]) -> IoResult<Payload> {
-    if packet.len() < 2 {
-        return Err(IoError {
-            kind: io::InvalidInput,
-            desc: "Unsupported GELF: Packet too short, less than 2 bytes.",
-            detail: None,
-        });
-    }
-    let magic_bytes = packet.slice_to(2);
-
-    match magic_bytes {
-        [0x1e, 0x0f] => Ok(Partial(try!(Chunk::from_packet(packet)))),
-        _ => Ok(Complete(try!(unpack(packet))))
+pub fn unpack(packet: &[u8]) -> IoResult<Payload> {
+    match packet {
+        [0x1e, 0x0f, _..] => Ok(Partial(try!(Chunk::from_packet(packet)))),
+        _ => Ok(Complete(try!(unpack_complete(packet))))
     }
 }
 
-pub fn unpack(packet: &[u8]) -> IoResult<String> {
-    if packet.len() < 2 {
-        return Err(IoError {
+pub fn unpack_complete(packet: &[u8]) -> IoResult<String> {
+    match packet {
+        [_] => Err(IoError {
             kind: io::InvalidInput,
             desc: "Unsupported GELF: Packet too short, less than 2 bytes.",
             detail: None,
-        });
-    }
-    let magic_bytes = packet.slice_to(2);
-
-    match magic_bytes {
-        [0x1f, 0x8b] => unpack_gzip(packet),
-        [0x78, 0x01] => unpack_zlib(packet), // @todo - Match all compression levels.
+        }),
+        [0x1f, 0x8b, _..] => unpack_gzip(packet),
+        [0x78, 0x01, _..] => unpack_zlib(packet), // @todo - Match all compression levels.
         _ => unpack_uncompressed(packet)
     }
 }
@@ -83,7 +70,10 @@ mod test {
         let json = r#"{message":"foo","host":"bar","_utf8":"✓"}"#;
         let packet = json.clone().as_bytes();
 
-        assert_eq!(json, unpack(packet).unwrap().as_slice());
+        match unpack(packet).unwrap() {
+            Partial(_) => assert!(false, "Expected 'Complete' result."),
+            Complete(s) => assert_eq!(json, s.as_slice())
+        }
     }
 
     #[test]
@@ -91,8 +81,12 @@ mod test {
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
         let rdr = BufReader::new(json.as_bytes());
         let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
+        let packet = byte_vec.as_slice();
 
-        assert_eq!(json, unpack(byte_vec.as_slice()).unwrap().as_slice());
+        match unpack(packet).unwrap() {
+            Partial(_) => assert!(false, "Expected 'Complete' result."),
+            Complete(s) => assert_eq!(json, s.as_slice())
+        }
     }
 
     #[test]
@@ -100,8 +94,12 @@ mod test {
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
         let rdr = BufReader::new(json.as_bytes());
         let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
+        let packet = byte_vec.as_slice();
 
-        assert_eq!(json, unpack(byte_vec.as_slice()).unwrap().as_slice());
+        match unpack(packet).unwrap() {
+            Partial(_) => assert!(false, "Expected 'Complete' result."),
+            Complete(s) => assert_eq!(json, s.as_slice())
+        }
     }
 
     #[test]
@@ -124,8 +122,9 @@ mod test {
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
         let rdr = BufReader::new(json.as_bytes());
         let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
+        let packet = byte_vec.as_slice();
 
-        b.iter(|| unpack(byte_vec.as_slice()));
+        b.iter(|| unpack(packet));
     }
 
     #[bench]
@@ -133,8 +132,9 @@ mod test {
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
         let rdr = BufReader::new(json.as_bytes());
         let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
+        let packet = byte_vec.as_slice();
 
-        b.iter(|| unpack(byte_vec.as_slice()));
+        b.iter(|| unpack(packet));
     }
 }
 
@@ -169,9 +169,12 @@ mod test_udp_receiver {
                 // From gelfclient... CHUNK_MAGIC_BYTES(2) + messageId(8) + sequenceNumber(1) + sequenceCount(1) + MAX_CHUNK_SIZE(1420)
                 let mut buf = [0, ..1432];
                 match server.recv_from(&mut buf) {
-                    Ok((n_read, src)) => {
-                        assert_eq!(json, unpack(buf.as_slice().slice_to(n_read)).unwrap().as_slice());
-                        assert_eq!(src, client_ip);
+                    Ok((n_read, _)) => {
+                        let packet = buf.as_slice().slice_to(n_read);
+                        match unpack(packet).unwrap() {
+                            Partial(_) => assert!(false, "Expected 'Complete' result."),
+                            Complete(s) => assert_eq!(json, s.as_slice())
+                        }
                     }
                     Err(..) => panic!()
                 }
