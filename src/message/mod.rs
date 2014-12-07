@@ -16,20 +16,20 @@ pub enum Payload {
 pub fn unpack(packet: &[u8]) -> IoResult<Payload> {
     match packet {
         [0x1e, 0x0f, ..] => Ok(Partial(try!(Chunk::from_packet(packet)))),
-        _ => Ok(Complete(try!(unpack_complete(packet))))
+        _                => Ok(Complete(try!(unpack_complete(packet))))
     }
 }
 
 pub fn unpack_complete(packet: &[u8]) -> IoResult<String> {
     match packet {
-        [] | [_] => Err(IoError {
+        [] | [_]                    => Err(IoError {
             kind: io::InvalidInput,
             desc: "Unsupported GELF: Packet too short, less than 2 bytes.",
             detail: None,
         }),
-        [0x1f, 0x8b, ..] => unpack_gzip(packet),
+        [0x1f, 0x8b, ..]            => unpack_gzip(packet),
         [0x78, x, ..] if is_zlib(x) => unpack_zlib(packet),
-        _ => unpack_uncompressed(packet)
+        _                           => unpack_uncompressed(packet)
     }
 }
 
@@ -48,7 +48,7 @@ fn unpack_zlib(packet: &[u8]) -> IoResult<String> {
 fn unpack_uncompressed(packet: &[u8]) -> IoResult<String> {
     match str::from_utf8(packet) {
         Some(payload) => Ok(payload.to_string()),
-        None => Err(IoError {
+        None          => Err(IoError {
             kind: io::InvalidInput,
             desc: "Unsupported GELF: Unknown, non-UTF8 payload.",
             detail: None,
