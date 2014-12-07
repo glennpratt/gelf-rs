@@ -22,14 +22,14 @@ pub fn unpack(packet: &[u8]) -> IoResult<Payload> {
 
 pub fn unpack_complete(packet: &[u8]) -> IoResult<String> {
     match packet {
-        [] | [_]                    => Err(IoError {
+        [0x1f, 0x8b, ..]            => unpack_gzip(packet),
+        [0x78, x, ..] if is_zlib(x) => unpack_zlib(packet),
+        [_, ..]                     => unpack_uncompressed(packet),
+        _                           => Err(IoError {
             kind: io::InvalidInput,
             desc: "Unsupported GELF: Packet too short, less than 2 bytes.",
             detail: None,
-        }),
-        [0x1f, 0x8b, ..]            => unpack_gzip(packet),
-        [0x78, x, ..] if is_zlib(x) => unpack_zlib(packet),
-        _                           => unpack_uncompressed(packet)
+        })
     }
 }
 
