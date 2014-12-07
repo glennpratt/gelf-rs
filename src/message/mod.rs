@@ -15,20 +15,20 @@ pub enum Payload {
 
 pub fn unpack(packet: &[u8]) -> IoResult<Payload> {
     match packet {
-        [0x1e, 0x0f, _..] => Ok(Partial(try!(Chunk::from_packet(packet)))),
+        [0x1e, 0x0f, ..] => Ok(Partial(try!(Chunk::from_packet(packet)))),
         _ => Ok(Complete(try!(unpack_complete(packet))))
     }
 }
 
 pub fn unpack_complete(packet: &[u8]) -> IoResult<String> {
     match packet {
-        [_] => Err(IoError {
+        [] | [_] => Err(IoError {
             kind: io::InvalidInput,
             desc: "Unsupported GELF: Packet too short, less than 2 bytes.",
             detail: None,
         }),
-        [0x1f, 0x8b, _..] => unpack_gzip(packet),
-        [0x78, 0x01, _..] => unpack_zlib(packet), // @todo - Match all compression levels.
+        [0x1f, 0x8b, ..] => unpack_gzip(packet),
+        [0x78, 0x01, ..] => unpack_zlib(packet), // @todo - Match all compression levels.
         _ => unpack_uncompressed(packet)
     }
 }
@@ -103,8 +103,15 @@ mod test {
     }
 
     #[test]
-    fn unpack_with_too_short() {
-        let packet: &[u8] = &[0x1e];
+    fn unpack_errors_with_no_bytes() {
+        let packet: &[u8] = &[];
+
+        assert!(unpack(packet).is_err());
+    }
+
+    #[test]
+    fn unpack_errors_with_one_byte() {
+        let packet: &[u8] = &[0x0f];
 
         assert!(unpack(packet).is_err());
     }
