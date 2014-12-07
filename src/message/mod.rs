@@ -14,6 +14,13 @@ pub enum Payload {
 }
 
 pub fn unpack_packet(packet: &[u8]) -> IoResult<Payload> {
+    if packet.len() < 2 {
+        return Err(IoError {
+            kind: io::InvalidInput,
+            desc: "Unsupported GELF: Packet too short, less than 2 bytes.",
+            detail: None,
+        });
+    }
     let magic_bytes = packet.slice_to(2);
 
     match magic_bytes {
@@ -23,6 +30,13 @@ pub fn unpack_packet(packet: &[u8]) -> IoResult<Payload> {
 }
 
 pub fn unpack(packet: &[u8]) -> IoResult<String> {
+    if packet.len() < 2 {
+        return Err(IoError {
+            kind: io::InvalidInput,
+            desc: "Unsupported GELF: Packet too short, less than 2 bytes.",
+            detail: None,
+        });
+    }
     let magic_bytes = packet.slice_to(2);
 
     match magic_bytes {
@@ -92,10 +106,9 @@ mod test {
 
     #[test]
     fn unpack_with_too_short() {
-        let bytes: &[u8] = &[0x1e];
-        bytes.slice_to(2);
+        let packet: &[u8] = &[0x1e];
 
-        unpack(bytes).unwrap().as_slice();
+        assert!(unpack(packet).is_err());
     }
 
     #[bench]
