@@ -28,7 +28,7 @@ pub fn unpack_complete(packet: &[u8]) -> IoResult<String> {
             detail: None,
         }),
         [0x1f, 0x8b, ..] => unpack_gzip(packet),
-        [0x78, 0x01, ..] => unpack_zlib(packet), // @todo - Match all compression levels.
+        [0x78, x, ..] if is_zlib(x) => unpack_zlib(packet),
         _ => unpack_uncompressed(packet)
     }
 }
@@ -54,6 +54,12 @@ fn unpack_uncompressed(packet: &[u8]) -> IoResult<String> {
             detail: None,
         })
     }
+}
+
+#[inline(always)]
+fn is_zlib(second_byte: u8) -> bool {
+    // unwrap() is optimized out for upsize, never panics. Says Yurume :)
+    (256 * 0x78 + second_byte.to_u16().unwrap()) % 31 == 0
 }
 
 #[cfg(test)]
