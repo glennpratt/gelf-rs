@@ -23,7 +23,7 @@ pub fn unpack(packet: &[u8]) -> IoResult<Payload> {
 pub fn unpack_complete(packet: &[u8]) -> IoResult<String> {
     match packet {
         [0x1f, 0x8b, ..]            => unpack_gzip(packet),
-        [0x78, x, ..] if is_zlib(x) => unpack_zlib(packet),
+        [0x78, y, ..] if is_zlib(y) => unpack_zlib(packet),
         [_, _, ..]                  => unpack_uncompressed(packet),
         _                           => Err(IoError {
             kind: io::InvalidInput,
