@@ -2,12 +2,13 @@ use std::io;
 use std::io::{IoError, IoResult};
 use time::{get_time, Timespec};
 
+#[deriving(Clone)]
 pub struct Chunk {
     pub id: Vec<u8>,
     pub sequence_number: u8,
     pub sequence_count: u8,
     pub payload: Vec<u8>,
-    pub arrival: Option<Timespec>
+    pub arrival: Timespec
 }
 
 impl Chunk {
@@ -18,7 +19,7 @@ impl Chunk {
                 sequence_number: packet[10],
                 sequence_count: packet[11],
                 payload: packet[12..].to_vec(),
-                arrival: Some(get_time())
+                arrival: get_time()
             })
         } else {
             Err(IoError {
@@ -54,6 +55,6 @@ mod test {
         assert_eq!(sequence_number, chunk.sequence_number);
         assert_eq!(sequence_count, chunk.sequence_count);
         assert_eq!(json.as_bytes(), chunk.payload.as_slice());
-        println!("{}", chunk.arrival.unwrap());
+        println!("{}", chunk.arrival);
     }
 }

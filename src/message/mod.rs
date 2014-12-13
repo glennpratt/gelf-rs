@@ -4,9 +4,11 @@ use std::io;
 use std::io::{BufReader, IoResult, IoError};
 
 pub use self::chunk::Chunk;
+pub use self::chunk_accumulator::ChunkAccumulator;
 pub use self::Payload::*;
 
 pub mod chunk;
+pub mod chunk_accumulator;
 
 pub enum Payload {
     Complete(String),
