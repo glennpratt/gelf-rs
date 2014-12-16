@@ -167,7 +167,7 @@ mod test_udp_receiver {
         let (tx1, rx1) = channel();
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
 
-        spawn(proc() {
+        spawn(move|| {
             match UdpSocket::bind(client_ip) {
                 Ok(ref mut client) => {
                     rx1.recv(); // Wait for signal main thread is listening.
