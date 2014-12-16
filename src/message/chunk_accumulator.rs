@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::IoResult;
-use time::{get_time, Timespec};
+use time::Timespec;
 
 use message::Chunk;
 use message::unpack_complete;
@@ -35,14 +35,13 @@ impl ChunkAccumulator {
 struct ChunkSet {
     chunks: Vec<Option<Chunk>>,
     rcv_count: uint,
-    first_arrival: Timespec
+    pub first_arrival: Timespec
 }
 
 impl ChunkSet {
     pub fn new(chunk: &Chunk) -> ChunkSet {
         let mut chunks = vec![];
         chunks.grow(chunk.sequence_count.to_uint().unwrap(), None);
-        let number = chunk.sequence_number.to_uint().unwrap();
         let arrival = chunk.arrival;
         ChunkSet { chunks: chunks, first_arrival: arrival, rcv_count: 0 }
     }
@@ -83,7 +82,6 @@ impl ChunkSet {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::collections::HashMap;
     use std::rand::{OsRng, Rng};
     use message::Chunk;
 
@@ -113,7 +111,7 @@ mod test {
         let chunk1 = Chunk::from_packet(packet1).unwrap();
         let chunk2 = Chunk::from_packet(packet2).unwrap();
         let mut acc = ChunkAccumulator::new();
-        acc.accept(chunk1);
+        acc.accept(chunk1).unwrap();
         let result = acc.accept(chunk2).unwrap().unwrap();
         assert_eq!(json, result.as_slice());
     }
@@ -134,8 +132,8 @@ mod test {
         let chunk_a_1 = Chunk::from_packet(chunks_a[0].as_slice()).unwrap();
         let chunk_a_2 = Chunk::from_packet(chunks_a[1].as_slice()).unwrap();
         let mut acc = ChunkAccumulator::new();
-        acc.accept(chunk_a_1);
-        acc.accept(chunk_b_1);
+        acc.accept(chunk_a_1).unwrap();
+        acc.accept(chunk_b_1).unwrap();
         let result_a = acc.accept(chunk_a_2).unwrap().unwrap();
         assert_eq!(json_a, result_a.as_slice());
         let result_b = acc.accept(chunk_b_2).unwrap().unwrap();
@@ -164,7 +162,7 @@ mod test {
         let sequence_count = count.to_u8().unwrap();
         let mut chunks = vec![];
         for x in range(0, sequence_count) {
-            let sequence_number = (x + 1);
+            let sequence_number = x + 1;
 
             let start = length * x.to_uint().unwrap();
             let end = length * (x + 1).to_uint().unwrap();
