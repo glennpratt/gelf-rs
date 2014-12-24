@@ -1,5 +1,6 @@
 use flate2::FlateReader;
 use std::str;
+// use std::str::Utf8Error;
 use std::io;
 use std::io::{BufReader, IoResult, IoError};
 
@@ -49,8 +50,8 @@ fn unpack_zlib(packet: &[u8]) -> IoResult<String> {
 
 fn unpack_uncompressed(packet: &[u8]) -> IoResult<String> {
     match str::from_utf8(packet) {
-        Some(payload) => Ok(payload.to_string()),
-        None          => Err(IoError {
+        Ok(payload) => Ok(payload.to_string()),
+        Err(_)      => Err(IoError {
             kind: io::InvalidInput,
             desc: "Unsupported GELF: Unknown, non-UTF8 payload.",
             detail: None,
@@ -159,6 +160,7 @@ mod test_udp_receiver {
     use std::io::net::udp::*;
     use std::prelude::*;
     use std::io::test::*;
+    use std::thread::Thread;
 
     #[test]
     fn udp_receiver_smoke_test() {
@@ -167,7 +169,7 @@ mod test_udp_receiver {
         let (tx1, rx1) = channel();
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
 
-        spawn(move|| {
+        let thread = Thread::spawn(move|| {
             match UdpSocket::bind(client_ip) {
                 Ok(ref mut client) => {
                     rx1.recv(); // Wait for signal main thread is listening.
@@ -196,5 +198,7 @@ mod test_udp_receiver {
             }
             Err(..) => panic!()
         }
+        // Join thread with OK result or panic.
+        thread.join().ok().unwrap();
     }
 }
