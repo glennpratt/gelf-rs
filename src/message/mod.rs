@@ -61,8 +61,7 @@ fn unpack_uncompressed(packet: &[u8]) -> IoResult<String> {
 
 #[inline(always)]
 fn is_zlib(second_byte: u8) -> bool {
-    // unwrap() is optimized out for upsize, never panics. Says Yurume :)
-    (256 * 0x78 + second_byte.to_u16().unwrap()) % 31 == 0
+    (256 * 0x78 + second_byte as u16) % 31 == 0
 }
 
 #[cfg(test)]
@@ -158,8 +157,8 @@ mod test {
 mod test_udp_receiver {
     use super::*;
     use std::io::net::udp::*;
-    use std::prelude::*;
     use std::io::test::*;
+    use std::sync::mpsc::channel;
     use std::thread::Thread;
 
     #[test]
@@ -172,7 +171,7 @@ mod test_udp_receiver {
         let thread = Thread::spawn(move|| {
             match UdpSocket::bind(client_ip) {
                 Ok(ref mut client) => {
-                    rx1.recv(); // Wait for signal main thread is listening.
+                    rx1.recv().unwrap(); // Wait for signal main thread is listening.
                     client.send_to(json.as_bytes(), server_ip).unwrap()
                 }
                 Err(..) => panic!()
@@ -181,10 +180,10 @@ mod test_udp_receiver {
 
         match UdpSocket::bind(server_ip) {
             Ok(ref mut server) => {
-                tx1.send(());
+                tx1.send(()).unwrap();
 
                 // From gelfclient... CHUNK_MAGIC_BYTES(2) + messageId(8) + sequenceNumber(1) + sequenceCount(1) + MAX_CHUNK_SIZE(1420)
-                let mut buf = [0, ..1432];
+                let mut buf = [0; 1432];
                 match server.recv_from(&mut buf) {
                     Ok((n_read, _)) => {
                         let packet = buf.as_slice().slice_to(n_read);

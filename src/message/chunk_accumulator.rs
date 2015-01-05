@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::IoResult;
+use std::iter::repeat;
 use time::Timespec;
 
 use message::Chunk;
@@ -40,14 +41,14 @@ struct ChunkSet {
 
 impl ChunkSet {
     pub fn new(chunk: &Chunk) -> ChunkSet {
-        let mut chunks = vec![];
-        chunks.grow(chunk.sequence_count.to_uint().unwrap(), None);
+        let size = chunk.sequence_count as uint;
+        let chunks = repeat(None).take(size).collect();
         let arrival = chunk.arrival;
         ChunkSet { chunks: chunks, first_arrival: arrival, rcv_count: 0 }
     }
 
     pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<String>> {
-        let number = chunk.sequence_number.to_uint().unwrap() - 1;
+        let number = chunk.sequence_number as uint - 1;
         // let index = chunk.sequence_count.to_uint().unwrap() - 1;
         // if  index != self.chunks.len() || index >= number {
         //     panic!("invalid - this shouldn't panic tho :)");
@@ -142,7 +143,7 @@ mod test {
 
     fn chunker(message: &str, max_length: uint) -> Vec<Vec<u8>> {
         // Test only id.
-        let mut id = [0u8, .. 8];
+        let mut id = [0u8; 8];
         let mut rng = OsRng::new().unwrap();
         rng.fill_bytes(&mut id);
 
@@ -159,13 +160,13 @@ mod test {
         }
         // Limit to max (255 for u8, GELF is lower, but meh).
         // Panics otherwise, should return Result(Err).
-        let sequence_count = count.to_u8().unwrap();
+        let sequence_count = count as u8;
         let mut chunks = vec![];
         for x in range(0, sequence_count) {
             let sequence_number = x + 1;
 
-            let start = length * x.to_uint().unwrap();
-            let end = length * (x + 1).to_uint().unwrap();
+            let start = length * x as uint;
+            let end = length * (x as uint + 1);
             let part = if end <= length {
                 message.as_bytes()[start..end]
             } else {
