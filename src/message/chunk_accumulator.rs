@@ -1,35 +1,96 @@
 use std::collections::HashMap;
-use std::io::IoResult;
+use std::io::{IoResult, Timer};
 use std::iter::repeat;
-use time::Timespec;
+use std::ops::Drop;
+use std::sync::{Arc,Mutex};
+use std::sync::mpsc::{channel, Sender};
+use std::thread::{JoinGuard, Thread};
+use std::time::Duration;
+
+use time::{get_time, Timespec};
 
 use message::Chunk;
 use message::unpack_complete;
 
+use self::ChunkAccumulatorSignal::{EvictionEntry, Quit};
+
+enum ChunkAccumulatorSignal {
+    EvictionEntry((Vec<u8>, Timespec)),
+    Quit
+}
+
 pub struct ChunkAccumulator {
-    map: HashMap<Vec<u8>, ChunkSet>
+    map: Arc<Mutex<HashMap<Vec<u8>, ChunkSet>>>,
+    tx: Sender<ChunkAccumulatorSignal>,
+    reaper: Option<JoinGuard<()>>
 }
 
 impl ChunkAccumulator {
     pub fn new() -> ChunkAccumulator {
-        let map = HashMap::new();
-        ChunkAccumulator { map: map }
+        let (tx, rx) = channel();
+        let mutex_map = Arc::new(Mutex::new(HashMap::new()));
+        let reaper_mutex_map = mutex_map.clone();
+
+        let thread = Thread::spawn(move|| {
+            let mut eviction_lifo: Vec<(Vec<u8>, Timespec)> = vec![];
+            let mut timer = Timer::new().unwrap();
+            let validity = Duration::seconds(5);
+
+            loop {
+                let timeout = if eviction_lifo.len() > 0 {
+                    let (_, arrival) = eviction_lifo[0];
+                    let eviction_time = arrival + validity;
+                    timer.oneshot(eviction_time - get_time())
+                } else {
+                    // I really want a null receiver here, but aliasing rules
+                    // make that hard.
+                    timer.oneshot(Duration::days(1000))
+                };
+                select! (
+                    signal = rx.recv() => {
+                        match signal.unwrap() {
+                            EvictionEntry(entry) => { eviction_lifo.push(entry); },
+                            Quit => { break; }
+                        }
+                    },
+                    _ = timeout.recv() => {
+                        let (id, _) = eviction_lifo.remove(0);
+                        let mut map = reaper_mutex_map.lock().unwrap();
+                        (*map).remove(&id);
+                        drop(map);
+                    }
+                )
+            }
+        });
+        let acc = ChunkAccumulator { map: mutex_map, tx: tx, reaper: Some(thread) };
+        acc
     }
 
     pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<String>> {
         let id = chunk.id.clone();
-        if let Some(set) = self.map.get_mut(&id) {
+        let mut map = self.map.lock().unwrap();
+        if let Some(set) = (*map).get_mut(&id) {
             return set.accept(chunk);
         }
         let mut set = ChunkSet::new(&chunk);
         match set.accept(chunk) {
             Ok(None)   => {
-                self.map.insert(id, set);
+                self.tx.send(EvictionEntry((id.clone(), set.first_arrival.clone())));
+                (*map).insert(id, set);
                 Ok(None)
             }
             Ok(string) => Ok(string),
             Err(e)     => Err(e)
         }
+    }
+}
+
+impl Drop for ChunkAccumulator {
+    fn drop(&mut self) {
+        self.tx.send(Quit);
+        // Replace reaper with None in the struct, confirm it's a thread, join
+        // the thread and confirm it's result was Ok or panic.
+        self.reaper.take().unwrap().join().ok().unwrap();
     }
 }
 
@@ -63,13 +124,16 @@ impl ChunkSet {
         }
     }
 
+    // @todo This should be done outside any lock! No reason to decompress under
+    // a lock, so return a complete ChunkSet removed from the HashMap for the 
+    // worker to decompress on it's own time.
     fn complete_or_none(&self) -> IoResult<Option<String>> {
         if self.rcv_count == self.chunks.len() {
+            // Just return ChunkSet, move this to ChunkSet.
             let mut complete_message = vec![];
             for chunk in self.chunks.iter() {
                 complete_message.push_all(chunk.clone().unwrap().payload.as_slice());
             }
-            // let complete_message = self.chunks[0].unwrap().payload.clone();
             // Delete or allow cleanup thread to do that?
             // Generate complete message.
             Ok(Some(try!(unpack_complete(complete_message.as_slice()))))
@@ -84,6 +148,9 @@ impl ChunkSet {
 mod test {
     use super::*;
     use std::rand::{OsRng, Rng};
+    use std::io::timer::sleep;
+    use std::time::Duration;
+    use time::get_time;
     use message::Chunk;
 
     #[test]
@@ -102,7 +169,6 @@ mod test {
 
     #[test]
     fn two_chunks() {
-        // Who knows if this should even be supported?
         let json = r#"{message":"foo","host":"bar","_utf8":"✓"}"#;
 
         let chunks = chunker(json, 22);
@@ -118,8 +184,27 @@ mod test {
     }
 
     #[test]
+    fn reaper() {
+        let json = r#"{message":"foo","host":"bar","_utf8":"✓"}"#;
+
+        let chunks = chunker(json, 22);
+        let packet1 = chunks[0].as_slice();
+        let packet2 = chunks[1].as_slice();
+
+        let mut chunk1 = Chunk::from_packet(packet1).unwrap();
+        // Backdate chunk1 arrival so it's already expired.
+        chunk1.arrival = get_time() - Duration::seconds(6);
+        let chunk2 = Chunk::from_packet(packet2).unwrap();
+        let mut acc = ChunkAccumulator::new();
+        acc.accept(chunk1).unwrap();
+        sleep(Duration::milliseconds(1)); // Allow reaper thread to run.
+        let option = acc.accept(chunk2).unwrap();
+        // The first packet expired, so the second doesn't complete anything.
+        assert_eq!(None, option);
+    }
+
+    #[test]
     fn two_chunked_messages() {
-        // Who knows if this should even be supported?
         let json_a = r#"{message":"foo","host":"bar","_utf8":"✓"}"#;
 
         let chunks_a = chunker(json_a, 22);
@@ -160,6 +245,7 @@ mod test {
         }
         // Limit to max (255 for u8, GELF is lower, but meh).
         // Panics otherwise, should return Result(Err).
+        // @todo this truncates...
         let sequence_count = count as u8;
         let mut chunks = vec![];
         for x in range(0, sequence_count) {
