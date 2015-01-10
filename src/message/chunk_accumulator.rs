@@ -22,7 +22,7 @@ enum ChunkAccumulatorSignal {
 pub struct ChunkAccumulator {
     map: Arc<Mutex<HashMap<Vec<u8>, ChunkSet>>>,
     tx: Sender<ChunkAccumulatorSignal>,
-    reaper: Option<JoinGuard<()>>
+    reaper: Option<JoinGuard<'static ()>>
 }
 
 impl ChunkAccumulator {
@@ -31,7 +31,7 @@ impl ChunkAccumulator {
         let mutex_map = Arc::new(Mutex::new(HashMap::new()));
         let reaper_mutex_map = mutex_map.clone();
 
-        let thread = Thread::spawn(move|| {
+        let thread = Thread::scoped(move|| {
             let mut eviction_lifo: Vec<(Vec<u8>, Timespec)> = vec![];
             let mut timer = Timer::new().unwrap();
             let validity = Duration::seconds(5);
