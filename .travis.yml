@@ -4,7 +4,8 @@ env:
 
 language: rust
 
-sudo: false
+# rust-ci.org docs thing requires sudo :(
+#sudo: false
 
 branches:
   only:
@@ -20,7 +21,4 @@ after_success: |
   [ $TRAVIS_BRANCH = master ] &&
   [ $TRAVIS_PULL_REQUEST = false ] &&
   mv target/doc . &&
-  wget http://www.rust-ci.org/artifacts/put?t=$RUSTCI_TOKEN &&
-  ls &&
-  cat put?t=* &&
-  sh put?t=*
+  (curl http://www.rust-ci.org/artifacts/put?t=$RUSTCI_TOKEN | sh)
