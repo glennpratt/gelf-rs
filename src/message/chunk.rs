@@ -55,6 +55,6 @@ mod test {
         assert_eq!(sequence_number, chunk.sequence_number);
         assert_eq!(sequence_count, chunk.sequence_count);
         assert_eq!(json.as_bytes(), chunk.payload.as_slice());
-        println!("{}", chunk.arrival);
+        println!("{:?}", chunk.arrival);
     }
 }

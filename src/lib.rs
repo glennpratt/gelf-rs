@@ -1,4 +1,3 @@
-#![feature(globs)]
 #![feature(slicing_syntax)]
 
 extern crate flate2;

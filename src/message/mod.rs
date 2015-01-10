@@ -168,7 +168,7 @@ mod test_udp_receiver {
         let (tx1, rx1) = channel();
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
 
-        let thread = Thread::spawn(move|| {
+        Thread::spawn(move|| {
             match UdpSocket::bind(client_ip) {
                 Ok(ref mut client) => {
                     rx1.recv().unwrap(); // Wait for signal main thread is listening.
@@ -197,7 +197,5 @@ mod test_udp_receiver {
             }
             Err(..) => panic!()
         }
-        // Join thread with OK result or panic.
-        thread.join().ok().unwrap();
     }
 }
