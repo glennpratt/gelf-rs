@@ -1,3 +1,7 @@
+env:
+  global:
+    - secure: AEH+ZcnwW/w0bhy5wioWS44si5jhwdXVkf1gBPZ0HOxkdPsEATy1q8mG+tdt6/jGedZDXjeDWoYV6mff8B4a7y1Iycdx5ssK2zX2IL10807lqozcpxrl7izS6jpMTcTIXH2F1B84t6tPJfTnC71chRFMedbbOkeQsHxQYbOPcs4=
+
 language: rust
 
 sudo: false
@@ -6,3 +10,14 @@ branches:
   only:
     - master
     - \bv?(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|x|X|[1-9][0-9]*)(?:-[\da-z\-]+(?:\.[\da-z\-]+)*)?(?:\+[\da-z\-]+(?:\.[\da-z\-]+)*)?\b
+
+script:
+  - cargo build --verbose
+  - cargo test --verbose
+  - cargo doc
+
+after_success: |
+  [ $TRAVIS_BRANCH = master ] &&
+  [ $TRAVIS_PULL_REQUEST = false ] &&
+  mv target/doc . &&
+  (curl http://www.rust-ci.org/artifacts/put?t=$RUSTCI_TOKEN | sh)
