@@ -35,21 +35,21 @@ impl ChunkAccumulator {
 
 struct ChunkSet {
     chunks: Vec<Option<Chunk>>,
-    rcv_count: uint,
+    rcv_count: usize,
     pub first_arrival: Timespec
 }
 
 impl ChunkSet {
     pub fn new(chunk: &Chunk) -> ChunkSet {
-        let size = chunk.sequence_count as uint;
+        let size = chunk.sequence_count as usize;
         let chunks = repeat(None).take(size).collect();
         let arrival = chunk.arrival;
         ChunkSet { chunks: chunks, first_arrival: arrival, rcv_count: 0 }
     }
 
     pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<String>> {
-        let number = chunk.sequence_number as uint - 1;
-        // let index = chunk.sequence_count.to_uint().unwrap() - 1;
+        let number = chunk.sequence_number as usize - 1;
+        // let index = chunk.sequence_count.to_usize().unwrap() - 1;
         // if  index != self.chunks.len() || index >= number {
         //     panic!("invalid - this shouldn't panic tho :)");
         // }
@@ -141,7 +141,7 @@ mod test {
         assert_eq!(json_b, result_b.as_slice());
     }
 
-    fn chunker(message: &str, max_length: uint) -> Vec<Vec<u8>> {
+    fn chunker(message: &str, max_length: usize) -> Vec<Vec<u8>> {
         // Test only id.
         let mut id = [0u8; 8];
         let mut rng = OsRng::new().unwrap();
@@ -165,12 +165,12 @@ mod test {
         for x in range(0, sequence_count) {
             let sequence_number = x + 1;
 
-            let start = length * x as uint;
-            let end = length * (x as uint + 1);
+            let start = length * x as usize;
+            let end = length * (x as usize + 1);
             let part = if end <= length {
-                message.as_bytes()[start..end]
+                &message.as_bytes()[start..end]
             } else {
-                message.as_bytes()[start..]
+                &message.as_bytes()[start..]
             };
 
             let mut bytes: Vec<u8> = vec![0x1e, 0x0f];
