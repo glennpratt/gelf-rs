@@ -21,7 +21,7 @@ enum ChunkAccumulatorSignal {
 
 pub struct ChunkAccumulator {
     map: Arc<Mutex<HashMap<Vec<u8>, ChunkSet>>>,
-    tx: Sender<ChunkAccumulatorSignal>,
+    reaper_tx: Sender<ChunkAccumulatorSignal>,
     reaper: Option<JoinGuard<'static ()>>
 }
 
@@ -32,38 +32,46 @@ impl ChunkAccumulator {
         let reaper_mutex_map = mutex_map.clone();
 
         let thread = Thread::scoped(move|| {
-            let mut eviction_lifo: Vec<(Vec<u8>, Timespec)> = vec![];
+            let mut eviction_fifo: Vec<(Vec<u8>, Timespec)> = vec![];
             let mut timer = Timer::new().unwrap();
             let validity = Duration::seconds(5);
+            // Get a receiver that will never recv() for when we don't have a
+            // timeout.
+            let (never_tx, never_rx) = channel::<()>();
+            // Move the never_rx into an Option so it isn't aliased as timeout.
+            // @todo this is ugly, find a better way. Two different select!s?
+            let mut never_rx_opt = Some(never_rx);
 
             loop {
-                let timeout = if eviction_lifo.len() > 0 {
-                    let (_, arrival) = eviction_lifo[0];
+                let timeout = if eviction_fifo.len() > 0 {
+                    let (_, arrival) = eviction_fifo[0];
                     let eviction_time = arrival + validity;
                     timer.oneshot(eviction_time - get_time())
                 } else {
-                    // I really want a null receiver here, but aliasing rules
-                    // make that hard.
-                    timer.oneshot(Duration::days(1000))
+                    never_rx_opt.take().unwrap()
                 };
                 select! (
-                    signal = rx.recv() => {
-                        match signal.unwrap() {
-                            EvictionEntry(entry) => { eviction_lifo.push(entry); },
-                            Quit => { break; }
-                        }
+                    msg = rx.recv() => match msg.unwrap() {
+                        EvictionEntry(e) => eviction_fifo.push(e),
+                        Quit             => break,
                     },
                     _ = timeout.recv() => {
-                        let (id, _) = eviction_lifo.remove(0);
+                        let (id, _) = eviction_fifo.remove(0);
                         let mut map = reaper_mutex_map.lock().unwrap();
                         (*map).remove(&id);
-                        drop(map);
                     }
-                )
+                );
+                // Move never_rx back if we used it.
+                if never_rx_opt.is_none() {
+                    never_rx_opt = Some(timeout);
+                }
             }
         });
-        let acc = ChunkAccumulator { map: mutex_map, tx: tx, reaper: Some(thread) };
-        acc
+        ChunkAccumulator {
+            map: mutex_map,
+            reaper_tx: tx,
+            reaper: Some(thread)
+        }
     }
 
     pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<String>> {
@@ -75,7 +83,7 @@ impl ChunkAccumulator {
         let mut set = ChunkSet::new(&chunk);
         match set.accept(chunk) {
             Ok(None)   => {
-                self.tx.send(EvictionEntry((id.clone(), set.first_arrival.clone())));
+                self.reaper_tx.send(EvictionEntry((id.clone(), set.first_arrival.clone())));
                 (*map).insert(id, set);
                 Ok(None)
             }
@@ -87,7 +95,7 @@ impl ChunkAccumulator {
 
 impl Drop for ChunkAccumulator {
     fn drop(&mut self) {
-        self.tx.send(Quit);
+        self.reaper_tx.send(Quit);
         // Replace reaper with None in the struct, confirm it's a thread, join
         // the thread and confirm it's result was Ok or panic.
         self.reaper.take().unwrap().join().ok().unwrap();
