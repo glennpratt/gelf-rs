@@ -37,8 +37,9 @@ impl ChunkAccumulator {
             let validity = Duration::seconds(5);
             // Get a receiver that will never recv() for when we don't have a
             // timeout.
-            let (never_tx, never_rx) = channel::<()>();
-            // Move the never_rx into an Option so it isn't aliased as timeout.
+            let (_never_tx, never_rx) = channel::<()>();
+            // Move the never_rx into an Option so it isn't aliased as timeout
+            // when used.
             // @todo this is ugly, find a better way. Two different select!s?
             let mut never_rx_opt = Some(never_rx);
 
@@ -48,7 +49,7 @@ impl ChunkAccumulator {
                     let eviction_time = arrival + validity;
                     timer.oneshot(eviction_time - get_time())
                 } else {
-                    never_rx_opt.take().unwrap()
+                    never_rx_opt.take().expect("Reaper null receiver was None. This should never happen")
                 };
                 select! (
                     msg = rx.recv() => match msg.unwrap() {
@@ -83,7 +84,8 @@ impl ChunkAccumulator {
         let mut set = ChunkSet::new(&chunk);
         match set.accept(chunk) {
             Ok(None)   => {
-                self.reaper_tx.send(EvictionEntry((id.clone(), set.first_arrival.clone())));
+                let eviction_entry = EvictionEntry((id.clone(), set.first_arrival.clone()));
+                self.reaper_tx.send(eviction_entry).unwrap();
                 (*map).insert(id, set);
                 Ok(None)
             }
@@ -95,12 +97,13 @@ impl ChunkAccumulator {
 
 impl Drop for ChunkAccumulator {
     fn drop(&mut self) {
-        self.reaper_tx.send(Quit);
-        // Replace reaper with None in the struct, confirm it's a thread, join
-        // the thread and confirm it's result was Ok or panic.
-        self.reaper.take().unwrap().join().ok().unwrap();
+        let _ = self.reaper_tx.send(Quit);
+        if let Some(thread) = self.reaper.take() {
+          thread.join().ok().expect("Reaper thread did not join successfully.");
+        }
     }
 }
+
 
 struct ChunkSet {
     chunks: Vec<Option<Chunk>>,
