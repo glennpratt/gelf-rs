@@ -20,7 +20,7 @@ enum ChunkAccumulatorSignal {
 }
 
 pub struct ChunkAccumulator {
-    map: Arc<Mutex<HashMap<Vec<u8>, ChunkSet>>>,
+    map: Arc<Mutex<HashMap<Vec<u8>, ChunkSet<Incomplete>>>>,
     reaper_tx: Sender<ChunkAccumulatorSignal>,
     reaper: Option<JoinGuard<'static ()>>
 }
@@ -75,7 +75,7 @@ impl ChunkAccumulator {
         }
     }
 
-    pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<String>> {
+    pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<ChunkSet<Complete>>> {
         let id = chunk.id.clone();
         let mut map = self.map.lock().unwrap();
         if let Some(set) = (*map).get_mut(&id) {
@@ -89,7 +89,7 @@ impl ChunkAccumulator {
                 (*map).insert(id, set);
                 Ok(None)
             }
-            Ok(string) => Ok(string),
+            Ok(complete) => Ok(complete),
             Err(e)     => Err(e)
         }
     }
@@ -104,22 +104,32 @@ impl Drop for ChunkAccumulator {
     }
 }
 
+#[derive(Show)]
+pub struct Incomplete;
+#[derive(Show)]
+pub struct Complete;
 
-struct ChunkSet {
+#[derive(Show)]
+pub struct ChunkSet<State> {
     chunks: Vec<Option<Chunk>>,
     rcv_count: usize,
     pub first_arrival: Timespec
 }
 
-impl ChunkSet {
-    pub fn new(chunk: &Chunk) -> ChunkSet {
+impl ChunkSet<Incomplete> {
+    pub fn new(chunk: &Chunk) -> ChunkSet<Incomplete> {
         let size = chunk.sequence_count as usize;
         let chunks = repeat(None).take(size).collect();
         let arrival = chunk.arrival;
-        ChunkSet { chunks: chunks, first_arrival: arrival, rcv_count: 0 }
+
+        ChunkSet::<Incomplete> {
+            chunks: chunks,
+            first_arrival:
+            arrival, rcv_count: 0
+        }
     }
 
-    pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<String>> {
+    pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<ChunkSet<Complete>>> {
         let number = chunk.sequence_number as usize - 1;
         // let index = chunk.sequence_count.to_usize().unwrap() - 1;
         // if  index != self.chunks.len() || index >= number {
@@ -135,23 +145,26 @@ impl ChunkSet {
         }
     }
 
-    // @todo This should be done outside any lock! No reason to decompress under
-    // a lock, so return a complete ChunkSet removed from the HashMap for the 
-    // worker to decompress on it's own time.
-    fn complete_or_none(&self) -> IoResult<Option<String>> {
+    fn complete_or_none(&self) -> IoResult<Option<ChunkSet<Complete>>> {
         if self.rcv_count == self.chunks.len() {
-            // Just return ChunkSet, move this to ChunkSet.
-            let mut complete_message = vec![];
-            for chunk in self.chunks.iter() {
-                complete_message.push_all(chunk.clone().unwrap().payload.as_slice());
-            }
-            // Delete or allow cleanup thread to do that?
-            // Generate complete message.
-            Ok(Some(try!(unpack_complete(complete_message.as_slice()))))
-            // Ok(None)
+            Ok(Some(ChunkSet::<Complete> {
+                chunks: self.chunks.clone(),
+                first_arrival: self.first_arrival.clone(),
+                rcv_count: self.rcv_count.clone()
+            }))
         } else {
             Ok(None)
         }
+    }
+}
+
+impl ChunkSet<Complete> {
+    fn unpack(&self) -> IoResult<String> {
+        let mut complete_message = vec![];
+        for chunk in self.chunks.iter() {
+            complete_message.push_all(chunk.clone().unwrap().payload.as_slice());
+        }
+        Ok(try!(unpack_complete(complete_message.as_slice())))
     }
 }
 
@@ -174,7 +187,8 @@ mod test {
 
         let chunk = Chunk::from_packet(packet).unwrap();
         let mut acc = ChunkAccumulator::new();
-        let result = acc.accept(chunk).unwrap().unwrap();
+        let chunk_set = acc.accept(chunk).unwrap().unwrap();
+        let result = chunk_set.unpack().unwrap();
         assert_eq!(json, result.as_slice());
     }
 
@@ -190,7 +204,8 @@ mod test {
         let chunk2 = Chunk::from_packet(packet2).unwrap();
         let mut acc = ChunkAccumulator::new();
         acc.accept(chunk1).unwrap();
-        let result = acc.accept(chunk2).unwrap().unwrap();
+        let chunk_set = acc.accept(chunk2).unwrap().unwrap();
+        let result = chunk_set.unpack().unwrap();
         assert_eq!(json, result.as_slice());
     }
 
@@ -208,10 +223,11 @@ mod test {
         let chunk2 = Chunk::from_packet(packet2).unwrap();
         let mut acc = ChunkAccumulator::new();
         acc.accept(chunk1).unwrap();
-        sleep(Duration::milliseconds(1)); // Allow reaper thread to run.
+        // Allow reaper thread to run.
+        sleep(Duration::milliseconds(1));
+
         let option = acc.accept(chunk2).unwrap();
-        // The first packet expired, so the second doesn't complete anything.
-        assert_eq!(None, option);
+        assert!(option.is_none(), "The first packet expired, so the second shouldn't complete anything");
     }
 
     #[test]
@@ -231,9 +247,11 @@ mod test {
         let mut acc = ChunkAccumulator::new();
         acc.accept(chunk_a_1).unwrap();
         acc.accept(chunk_b_1).unwrap();
-        let result_a = acc.accept(chunk_a_2).unwrap().unwrap();
+        let chunk_set_a = acc.accept(chunk_a_2).unwrap().unwrap();
+        let result_a = chunk_set_a.unpack().unwrap();
         assert_eq!(json_a, result_a.as_slice());
-        let result_b = acc.accept(chunk_b_2).unwrap().unwrap();
+        let chunk_set_b = acc.accept(chunk_b_2).unwrap().unwrap();
+        let result_b = chunk_set_b.unpack().unwrap();
         assert_eq!(json_b, result_b.as_slice());
     }
 
