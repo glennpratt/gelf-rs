@@ -3,7 +3,7 @@ use std::io::{IoResult, Timer};
 use std::iter::repeat;
 use std::ops::Drop;
 use std::sync::{Arc,Mutex};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::{JoinGuard, Thread};
 use std::time::Duration;
 
@@ -12,157 +12,167 @@ use time::{get_time, Timespec};
 use message::Chunk;
 use message::unpack_complete;
 
-use self::ChunkAccumulatorSignal::{EvictionEntry, Quit};
-
-enum ChunkAccumulatorSignal {
-    EvictionEntry((Vec<u8>, Timespec)),
+enum Signal {
+    EvictionEntry((Vec<u8>, Duration)),
     Quit
 }
 
 pub struct ChunkAccumulator {
-    map: Arc<Mutex<HashMap<Vec<u8>, ChunkSet<Incomplete>>>>,
-    reaper_tx: Sender<ChunkAccumulatorSignal>,
+    map: Arc<Mutex<HashMap<Vec<u8>, ChunkSet>>>,
+    reaper_tx: Sender<Signal>,
     reaper: Option<JoinGuard<'static ()>>
 }
 
 impl ChunkAccumulator {
     pub fn new() -> ChunkAccumulator {
         let (tx, rx) = channel();
-        let mutex_map = Arc::new(Mutex::new(HashMap::new()));
-        let reaper_mutex_map = mutex_map.clone();
+        let map_mutex = Arc::new(Mutex::new(HashMap::new()));
+        let reaper_map_mutex = map_mutex.clone();
 
+        // Start a reaper thread to evict expired chunks from the HashMap. This
+        // thread should have the same lifetime as the struct.
         let thread = Thread::scoped(move|| {
-            let mut eviction_fifo: Vec<(Vec<u8>, Timespec)> = vec![];
-            let mut timer = Timer::new().unwrap();
-            let validity = Duration::seconds(5);
-            // Get a receiver that will never recv() for when we don't have a
-            // timeout.
-            let (_never_tx, never_rx) = channel::<()>();
-            // Move the never_rx into an Option so it isn't aliased as timeout
-            // when used.
-            // @todo this is ugly, find a better way. Two different select!s?
-            let mut never_rx_opt = Some(never_rx);
-
-            loop {
-                let timeout = if eviction_fifo.len() > 0 {
-                    let (_, arrival) = eviction_fifo[0];
-                    let eviction_time = arrival + validity;
-                    timer.oneshot(eviction_time - get_time())
-                } else {
-                    never_rx_opt.take().expect("Reaper null receiver was None. This should never happen")
-                };
-                select! (
-                    msg = rx.recv() => match msg.unwrap() {
-                        EvictionEntry(e) => eviction_fifo.push(e),
-                        Quit             => break,
-                    },
-                    _ = timeout.recv() => {
-                        let (id, _) = eviction_fifo.remove(0);
-                        let mut map = reaper_mutex_map.lock().unwrap();
-                        (*map).remove(&id);
-                    }
-                );
-                // Move never_rx back if we used it.
-                if never_rx_opt.is_none() {
-                    never_rx_opt = Some(timeout);
-                }
-            }
+            ChunkAccumulator::reaper(reaper_map_mutex, rx);
         });
+
         ChunkAccumulator {
-            map: mutex_map,
+            map: map_mutex,
             reaper_tx: tx,
             reaper: Some(thread)
         }
     }
 
-    pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<ChunkSet<Complete>>> {
+    pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<ChunkSet>> {
         let id = chunk.id.clone();
         let mut map = self.map.lock().unwrap();
-        if let Some(set) = (*map).get_mut(&id) {
-            return set.accept(chunk);
+
+        if (*map).contains_key(&id) {
+            // This is a bit convoluted because of lexical borrows. The
+            // get_mut().unwrap() should never panic because we've already run
+            // contains_key() under a lock(). With non-lexical borrows, this
+            // can be a single match or if-let.
+            let result = (*map).get_mut(&id).unwrap().accept(chunk);
+            return match result {
+                ChunkSetState::Complete => Ok((*map).remove(&id)),
+                _                       => Ok(None),
+            }
         }
-        let mut set = ChunkSet::new(&chunk);
-        match set.accept(chunk) {
-            Ok(None)   => {
-                let eviction_entry = EvictionEntry((id.clone(), set.first_arrival.clone()));
-                self.reaper_tx.send(eviction_entry).unwrap();
-                (*map).insert(id, set);
+
+        let mut new_set = ChunkSet::new(&chunk);
+        match new_set.accept(chunk) {
+            ChunkSetState::Complete  => Ok(Some(new_set)),
+            ChunkSetState::Partial   => {
+                let eviction_entry = Signal::EvictionEntry((
+                    id.clone(),
+                    new_set.expires_in()
+                ));
+                self.reaper_tx.send(eviction_entry).ok().expect("Communication with Reaper thread failed.");
+                (*map).insert(id, new_set);
                 Ok(None)
             }
-            Ok(complete) => Ok(complete),
-            Err(e)     => Err(e)
+        }
+    }
+
+    fn reaper(map_mutex: Arc<Mutex<HashMap<Vec<u8>, ChunkSet>>>, rx: Receiver<Signal>) {
+        let mut eviction_fifo: Vec<(Vec<u8>, Duration)> = vec![];
+        let mut timer = Timer::new().unwrap();
+        let validity = Duration::seconds(5);
+        // Get a receiver that will never recv() for when we don't have a
+        // timeout.
+        let (_never_tx, never_rx) = channel::<()>();
+        // Move the never_rx into an Option so it isn't aliased as timeout
+        // when used.
+        // @todo this seems ugly, find a better way. Two different select!s?
+        let mut never_rx_opt = Some(never_rx);
+
+        loop {
+            let timeout = if eviction_fifo.len() > 0 {
+                let (_, expires_in) = eviction_fifo[0];
+                timer.oneshot(expires_in)
+            } else {
+                never_rx_opt.take().expect("Reaper null receiver was None. This should never happen")
+            };
+            select!(
+                msg = rx.recv() => match msg.unwrap() {
+                    Signal::EvictionEntry(e) => eviction_fifo.push(e),
+                    Signal::Quit             => break,
+                },
+                _ = timeout.recv() => {
+                    let (id, _) = eviction_fifo.remove(0);
+                    let mut map = map_mutex.lock().unwrap();
+                    (*map).remove(&id);
+                }
+            );
+            // Move never_rx back if we used it.
+            if never_rx_opt.is_none() {
+                never_rx_opt = Some(timeout);
+            }
         }
     }
 }
 
 impl Drop for ChunkAccumulator {
     fn drop(&mut self) {
-        let _ = self.reaper_tx.send(Quit);
+        let _ = self.reaper_tx.send(Signal::Quit);
         if let Some(thread) = self.reaper.take() {
-          thread.join().ok().expect("Reaper thread did not join successfully.");
+            thread.join().ok().expect("Reaper thread did not join successfully.");
         }
     }
 }
 
-#[derive(Show)]
-pub struct Incomplete;
-#[derive(Show)]
-pub struct Complete;
-
-#[derive(Show)]
-pub struct ChunkSet<State> {
-    chunks: Vec<Option<Chunk>>,
-    rcv_count: usize,
-    pub first_arrival: Timespec
+enum ChunkSetState {
+    Partial,
+    Complete
 }
 
-impl ChunkSet<Incomplete> {
-    pub fn new(chunk: &Chunk) -> ChunkSet<Incomplete> {
+#[derive(Show)]
+pub struct ChunkSet {
+    chunks: Vec<Option<Chunk>>,
+    rcv_count: usize,
+    first_arrival: Timespec
+}
+
+impl ChunkSet {
+    fn new(chunk: &Chunk) -> ChunkSet {
         let size = chunk.sequence_count as usize;
         let chunks = repeat(None).take(size).collect();
         let arrival = chunk.arrival;
 
-        ChunkSet::<Incomplete> {
+        ChunkSet {
             chunks: chunks,
-            first_arrival:
-            arrival, rcv_count: 0
+            first_arrival: arrival,
+            rcv_count: 0
         }
     }
 
-    pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<ChunkSet<Complete>>> {
+    fn accept(&mut self, chunk: Chunk) -> ChunkSetState {
         let number = chunk.sequence_number as usize - 1;
-        // let index = chunk.sequence_count.to_usize().unwrap() - 1;
-        // if  index != self.chunks.len() || index >= number {
-        //     panic!("invalid - this shouldn't panic tho :)");
-        // }
         match self.chunks[number] {
             None => {
                 self.chunks[number] = Some(chunk);
                 self.rcv_count += 1;
-                self.complete_or_none()
+                if self.rcv_count == self.chunks.len() {
+                    ChunkSetState::Complete
+                } else {
+                    ChunkSetState::Partial
+                }
             },
-            Some(_) => Ok(None) // @todo duplicate packet, error or meh? Java overwrites (maybe)?
+            // @todo duplicate packet, error or meh? Java overwrites (maybe)?
+            Some(_) => ChunkSetState::Partial
         }
     }
 
-    fn complete_or_none(&self) -> IoResult<Option<ChunkSet<Complete>>> {
-        if self.rcv_count == self.chunks.len() {
-            Ok(Some(ChunkSet::<Complete> {
-                chunks: self.chunks.clone(),
-                first_arrival: self.first_arrival.clone(),
-                rcv_count: self.rcv_count.clone()
-            }))
-        } else {
-            Ok(None)
-        }
+    fn expires_in(&self) -> Duration {
+        let validity = Duration::seconds(5);
+        let eviction_time = self.first_arrival + validity;
+        eviction_time - get_time()
     }
-}
 
-impl ChunkSet<Complete> {
-    fn unpack(&self) -> IoResult<String> {
+    // TODO Restrict this to complete messages.
+    pub fn unpack(&mut self) -> IoResult<String> {
         let mut complete_message = vec![];
-        for chunk in self.chunks.iter() {
-            complete_message.push_all(chunk.clone().unwrap().payload.as_slice());
+        for chunk in self.chunks.drain() {
+            complete_message.push_all(chunk.unwrap().payload.as_slice());
         }
         Ok(try!(unpack_complete(complete_message.as_slice())))
     }
@@ -187,7 +197,7 @@ mod test {
 
         let chunk = Chunk::from_packet(packet).unwrap();
         let mut acc = ChunkAccumulator::new();
-        let chunk_set = acc.accept(chunk).unwrap().unwrap();
+        let mut chunk_set = acc.accept(chunk).unwrap().unwrap();
         let result = chunk_set.unpack().unwrap();
         assert_eq!(json, result.as_slice());
     }
@@ -204,7 +214,7 @@ mod test {
         let chunk2 = Chunk::from_packet(packet2).unwrap();
         let mut acc = ChunkAccumulator::new();
         acc.accept(chunk1).unwrap();
-        let chunk_set = acc.accept(chunk2).unwrap().unwrap();
+        let mut chunk_set = acc.accept(chunk2).unwrap().unwrap();
         let result = chunk_set.unpack().unwrap();
         assert_eq!(json, result.as_slice());
     }
@@ -223,8 +233,8 @@ mod test {
         let chunk2 = Chunk::from_packet(packet2).unwrap();
         let mut acc = ChunkAccumulator::new();
         acc.accept(chunk1).unwrap();
-        // Allow reaper thread to run.
-        sleep(Duration::milliseconds(1));
+        // Allow reaper thread to run - not bulletproof, but seems to work...
+        sleep(Duration::milliseconds(10));
 
         let option = acc.accept(chunk2).unwrap();
         assert!(option.is_none(), "The first packet expired, so the second shouldn't complete anything");
@@ -247,10 +257,10 @@ mod test {
         let mut acc = ChunkAccumulator::new();
         acc.accept(chunk_a_1).unwrap();
         acc.accept(chunk_b_1).unwrap();
-        let chunk_set_a = acc.accept(chunk_a_2).unwrap().unwrap();
+        let mut chunk_set_a = acc.accept(chunk_a_2).unwrap().unwrap();
         let result_a = chunk_set_a.unpack().unwrap();
         assert_eq!(json_a, result_a.as_slice());
-        let chunk_set_b = acc.accept(chunk_b_2).unwrap().unwrap();
+        let mut chunk_set_b = acc.accept(chunk_b_2).unwrap().unwrap();
         let result_b = chunk_set_b.unpack().unwrap();
         assert_eq!(json_b, result_b.as_slice());
     }
