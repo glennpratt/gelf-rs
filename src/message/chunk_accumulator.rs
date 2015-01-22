@@ -181,6 +181,7 @@ impl ChunkSet {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::cmp::min;
     use std::rand::{OsRng, Rng};
     use std::io::timer::sleep;
     use std::time::Duration;
@@ -271,17 +272,11 @@ mod test {
         let mut rng = OsRng::new().unwrap();
         rng.fill_bytes(&mut id);
 
-        let length = if message.len() > max_length {
-            max_length
-        } else {
-            message.len()
-        };
+        let length = min(message.len(), max_length);
 
-        let mut count = message.len() / length;
-        let remainder = message.len() % length;
-        if remainder != 0 {
-            count += 1;
-        }
+        // Unsigned integer division ceiling.
+        let count = (message.len() + length - 1) / length;
+
         // Limit to max (255 for u8, GELF is lower, but meh).
         // Panics otherwise, should return Result(Err).
         // @todo this truncates...
