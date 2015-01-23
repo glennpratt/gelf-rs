@@ -36,6 +36,11 @@ pub fn unpack_complete(packet: &[u8]) -> IoResult<String> {
     }
 }
 
+#[inline(always)]
+fn is_zlib(second_byte: u8) -> bool {
+    (256 * 0x78 + second_byte as u16) % 31 == 0
+}
+
 fn unpack_gzip(packet: &[u8]) -> IoResult<String> {
     let mut reader = BufReader::new(packet).gz_decode();
     let bytes = try!(reader.read_to_end());
@@ -57,11 +62,6 @@ fn unpack_uncompressed(packet: &[u8]) -> IoResult<String> {
             detail: None,
         })
     }
-}
-
-#[inline(always)]
-fn is_zlib(second_byte: u8) -> bool {
-    (256 * 0x78 + second_byte as u16) % 31 == 0
 }
 
 #[cfg(test)]
