@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{IoResult, Timer};
+use std::old_io::{IoResult, Timer};
 use std::iter::repeat;
 use std::ops::Drop;
 use std::sync::{Arc,Mutex};
@@ -183,7 +183,7 @@ mod test {
     use super::*;
     use std::cmp::min;
     use std::rand::{OsRng, Rng};
-    use std::io::timer::sleep;
+    use std::old_io::timer::sleep;
     use std::time::Duration;
     use time::get_time;
     use message::Chunk;

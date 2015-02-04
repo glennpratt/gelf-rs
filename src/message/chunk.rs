@@ -1,5 +1,5 @@
-use std::io;
-use std::io::{IoError, IoResult};
+use std::old_io;
+use std::old_io::{IoError, IoResult};
 use time::{get_time, Timespec};
 
 #[derive(Clone, Show)]
@@ -23,7 +23,7 @@ impl Chunk {
             })
         } else {
             Err(IoError {
-                kind: io::InvalidInput,
+                kind: old_io::InvalidInput,
                 desc: "Unsupported GELF: Chunked message must be at least 12 bytes long.",
                 detail: None,
             })

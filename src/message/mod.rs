@@ -1,8 +1,7 @@
 use flate2::FlateReader;
 use std::str;
-// use std::str::Utf8Error;
-use std::io;
-use std::io::{BufReader, IoResult, IoError};
+use std::old_io;
+use std::old_io::{BufReader, IoResult, IoError};
 
 pub use self::chunk::Chunk;
 pub use self::chunk_accumulator::ChunkAccumulator;
@@ -29,14 +28,14 @@ pub fn unpack_complete(packet: &[u8]) -> IoResult<String> {
         [0x78, y, ..] if is_zlib(y) => unpack_zlib(packet),
         [_, _, ..]                  => unpack_uncompressed(packet),
         _                           => Err(IoError {
-            kind: io::InvalidInput,
+            kind: old_io::InvalidInput,
             desc: "Unsupported GELF: Packet too short, less than 2 bytes.",
             detail: None,
         })
     }
 }
 
-#[inline(always)]
+#[inline]
 fn is_zlib(second_byte: u8) -> bool {
     (256 * 0x78 + second_byte as u16) % 31 == 0
 }
@@ -57,7 +56,7 @@ fn unpack_uncompressed(packet: &[u8]) -> IoResult<String> {
     match str::from_utf8(packet) {
         Ok(payload) => Ok(payload.to_string()),
         Err(_)      => Err(IoError {
-            kind: io::InvalidInput,
+            kind: old_io::InvalidInput,
             desc: "Unsupported GELF: Unknown, non-UTF8 payload.",
             detail: None,
         })
@@ -71,7 +70,7 @@ mod test {
     use self::test::Bencher;
     use super::*;
     use flate2::{FlateReader, CompressionLevel};
-    use std::io::{BufReader};
+    use std::old_io::{BufReader};
 
     #[test]
     fn unpack_with_uncompressed() {
@@ -156,8 +155,8 @@ mod test {
 #[cfg(test)]
 mod test_udp_receiver {
     use super::*;
-    use std::io::net::udp::*;
-    use std::io::test::*;
+    use std::old_io::net::udp::*;
+    use std::old_io::test::*;
     use std::sync::mpsc::channel;
     use std::thread::Thread;
 
