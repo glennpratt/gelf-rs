@@ -115,7 +115,7 @@ impl Drop for ChunkAccumulator {
     fn drop(&mut self) {
         let _ = self.reaper_tx.send(Signal::Quit);
         if let Some(thread) = self.reaper.take() {
-            thread.join().ok().expect("Reaper thread did not join successfully.");
+            thread.join();
         }
     }
 }
@@ -125,7 +125,7 @@ enum ChunkSetState {
     Complete
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct ChunkSet {
     chunks: Vec<Option<Chunk>>,
     rcv_count: usize,

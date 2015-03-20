@@ -2,7 +2,7 @@ use std::old_io;
 use std::old_io::{IoError, IoResult};
 use time::{get_time, Timespec};
 
-#[derive(Clone, Show)]
+#[derive(Clone, Debug)]
 pub struct Chunk {
     pub id: Vec<u8>,
     pub sequence_number: u8,

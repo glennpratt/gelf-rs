@@ -1,4 +1,5 @@
-use flate2::FlateReader;
+use std::io::prelude::*;
+use flate2::read::{GzDecoder, ZlibDecoder};
 use std::str;
 use std::old_io;
 use std::old_io::{BufReader, IoResult, IoError};
@@ -39,14 +40,16 @@ fn is_zlib(second_byte: u8) -> bool {
 }
 
 fn unpack_gzip(packet: &[u8]) -> IoResult<String> {
-    let mut reader = BufReader::new(packet).gz_decode();
-    let bytes = try!(reader.read_to_end());
+    let mut decoder = GzDecoder::new(packet).unwrap();
+    let mut bytes = Vec::new();
+    let mut reader = decoder.read_to_end(&mut bytes).unwrap();
     unpack_uncompressed(bytes.as_slice().clone())
 }
 
 fn unpack_zlib(packet: &[u8]) -> IoResult<String> {
-    let mut reader = BufReader::new(packet).zlib_decode();
-    let bytes = try!(reader.read_to_end());
+    let mut decoder = ZlibDecoder::new(packet);
+    let mut bytes = Vec::new();
+    let mut reader = decoder.read_to_end(&mut bytes).unwrap();
     unpack_uncompressed(bytes.as_slice().clone())
 }
 
@@ -67,8 +70,9 @@ mod test {
 
     use self::test::Bencher;
     use super::*;
-    use flate2::{FlateReader, CompressionLevel};
-    use std::old_io::{BufReader};
+    use std::io::prelude::*;
+    use flate2::Compression;
+    use flate2::write::{GzEncoder, ZlibEncoder};
 
     #[test]
     fn unpack_with_uncompressed() {
@@ -84,8 +88,9 @@ mod test {
     #[test]
     fn unpack_with_gzip() {
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
-        let rdr = BufReader::new(json.as_bytes());
-        let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
+        let mut e = GzEncoder::new(Vec::new(), Compression::Default);
+        e.write(json.as_bytes());
+        let byte_vec = e.finish().unwrap();
         let packet = byte_vec.as_slice();
 
         match unpack(packet).unwrap() {
@@ -97,8 +102,9 @@ mod test {
     #[test]
     fn unpack_with_zlib() {
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
-        let rdr = BufReader::new(json.as_bytes());
-        let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
+        let mut e = ZlibEncoder::new(Vec::new(), Compression::Default);
+        e.write(json.as_bytes());
+        let byte_vec = e.finish().unwrap();
         let packet = byte_vec.as_slice();
 
         match unpack(packet).unwrap() {
@@ -132,8 +138,9 @@ mod test {
     #[bench]
     fn bench_zlib(b: &mut Bencher) {
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
-        let rdr = BufReader::new(json.as_bytes());
-        let byte_vec = rdr.zlib_encode(CompressionLevel::Default).read_to_end().unwrap();
+        let mut e = ZlibEncoder::new(Vec::new(), Compression::Default);
+        e.write(json.as_bytes());
+        let byte_vec = e.finish().unwrap();
         let packet = byte_vec.as_slice();
 
         b.iter(|| unpack(packet));
@@ -142,8 +149,9 @@ mod test {
     #[bench]
     fn bench_gzip(b: &mut Bencher) {
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
-        let rdr = BufReader::new(json.as_bytes());
-        let byte_vec = rdr.gz_encode(CompressionLevel::Default).read_to_end().unwrap();
+        let mut e = GzEncoder::new(Vec::new(), Compression::Default);
+        e.write(json.as_bytes());
+        let byte_vec = e.finish().unwrap();
         let packet = byte_vec.as_slice();
 
         b.iter(|| unpack(packet));
