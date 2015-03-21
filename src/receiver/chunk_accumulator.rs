@@ -1,6 +1,8 @@
 use std::collections::HashMap;
-use std::old_io::{IoResult, Timer};
+use std::io::prelude::*;
+use std::io;
 use std::iter::repeat;
+use std::old_io::timer::Timer;
 use std::ops::Drop;
 use std::sync::{Arc,Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -42,7 +44,7 @@ impl ChunkAccumulator {
         }
     }
 
-    pub fn accept(&mut self, chunk: Chunk) -> IoResult<Option<ChunkSet>> {
+    pub fn accept(&mut self, chunk: Chunk) -> io::Result<Option<ChunkSet>> {
         let id = chunk.id.clone();
         let mut map = self.map.lock().unwrap();
 
@@ -169,7 +171,7 @@ impl ChunkSet {
     }
 
     // TODO Restrict this to complete messages.
-    pub fn unpack(&mut self) -> IoResult<String> {
+    pub fn unpack(&mut self) -> io::Result<String> {
         let mut complete_message = vec![];
         for chunk in self.chunks.drain() {
             complete_message.push_all(chunk.unwrap().payload.as_slice());

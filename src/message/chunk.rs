@@ -1,5 +1,5 @@
-use std::old_io;
-use std::old_io::{IoError, IoResult};
+use std::io::prelude::*;
+use std::io;
 use time::{get_time, Timespec};
 
 #[derive(Clone, Debug)]
@@ -12,7 +12,7 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn from_packet(packet: &[u8]) -> IoResult<Chunk> {
+    pub fn from_packet(packet: &[u8]) -> io::Result<Chunk> {
         if packet.len() > 12 {
             Ok(Chunk {
                 id: packet[2..10].to_vec(),
@@ -22,11 +22,11 @@ impl Chunk {
                 arrival: get_time()
             })
         } else {
-            Err(IoError {
-                kind: old_io::InvalidInput,
-                desc: "Unsupported GELF: Chunked message must be at least 12 bytes long.",
-                detail: None,
-            })
+            Err(io::Error::new(
+                  io::ErrorKind::InvalidInput,
+                  "Unsupported GELF: Chunked message must be at least 12 bytes long.",
+                  None)
+            )
         }
     }
 }
