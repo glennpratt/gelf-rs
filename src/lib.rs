@@ -1,4 +1,4 @@
-#![feature(collections, core, io, std_misc, test)]
+#![feature(collections, core, io, slice_patterns, std_misc, test)]
 #![feature(old_io)]
 
 extern crate flate2;
