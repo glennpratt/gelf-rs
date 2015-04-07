@@ -1,4 +1,3 @@
-use std::io::prelude::*;
 use std::io;
 use time::{get_time, Timespec};
 

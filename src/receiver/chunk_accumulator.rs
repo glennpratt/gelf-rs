@@ -184,7 +184,7 @@ impl ChunkSet {
 mod test {
     use super::*;
     use std::cmp::min;
-    use std::rand::{OsRng, Rng};
+    use rand::{OsRng, Rng};
     use std::old_io::timer::sleep;
     use std::time::Duration;
     use time::get_time;

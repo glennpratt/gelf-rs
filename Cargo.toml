@@ -6,4 +6,5 @@ authors = ["Glenn Pratt <glenn.pratt@acquia.com>"]
 
 [dependencies]
 flate2 = "*"
+rand = "*"
 time = "*"
