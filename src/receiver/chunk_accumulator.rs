@@ -284,7 +284,7 @@ mod test {
         // @todo this truncates...
         let sequence_count = count as u8;
         let mut chunks = vec![];
-        for x in range(0, sequence_count) {
+        for x in 0..sequence_count {
             let sequence_number = x + 1;
 
             let start = length * x as usize;
