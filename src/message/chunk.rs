@@ -23,8 +23,8 @@ impl Chunk {
         } else {
             Err(io::Error::new(
                   io::ErrorKind::InvalidInput,
-                  "Unsupported GELF: Chunked message must be at least 12 bytes long.",
-                  None)
+                  "Unsupported GELF: Chunked message must be at least 12 bytes long."
+                )
             )
         }
     }

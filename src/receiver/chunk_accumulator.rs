@@ -6,9 +6,11 @@ use std::old_io::timer::Timer;
 use std::ops::Drop;
 use std::sync::{Arc,Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
 use std::thread::{JoinGuard, Thread};
 use std::time::Duration;
 
+use time;
 use time::{get_time, Timespec};
 
 use message::Chunk;
@@ -33,7 +35,7 @@ impl ChunkAccumulator {
 
         // Start a reaper thread to evict expired chunks from the HashMap. This
         // thread should have the same lifetime as the struct.
-        let thread = Thread::scoped(move|| {
+        let thread = thread::scoped(move|| {
             ChunkAccumulator::reaper(reaper_map_mutex, rx);
         });
 
@@ -165,9 +167,9 @@ impl ChunkSet {
     }
 
     fn expires_in(&self) -> Duration {
-        let validity = Duration::seconds(5);
+        let validity = time::Duration::seconds(5);
         let eviction_time = self.first_arrival + validity;
-        eviction_time - get_time()
+        Duration::seconds((eviction_time - get_time()).num_seconds())
     }
 
     // TODO Restrict this to complete messages.
@@ -187,7 +189,7 @@ mod test {
     use rand::{OsRng, Rng};
     use std::old_io::timer::sleep;
     use std::time::Duration;
-    use time::get_time;
+    use time;
     use message::Chunk;
 
     #[test]
@@ -232,7 +234,7 @@ mod test {
 
         let mut chunk1 = Chunk::from_packet(packet1).unwrap();
         // Backdate chunk1 arrival so it's already expired.
-        chunk1.arrival = get_time() - Duration::seconds(6);
+        chunk1.arrival = time::get_time() - time::Duration::seconds(6);
         let chunk2 = Chunk::from_packet(packet2).unwrap();
         let mut acc = ChunkAccumulator::new();
         acc.accept(chunk1).unwrap();

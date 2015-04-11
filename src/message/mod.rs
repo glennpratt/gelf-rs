@@ -27,10 +27,7 @@ pub fn unpack_complete(packet: &[u8]) -> io::Result<String> {
         [_, _, ..]                  => unpack_uncompressed(packet),
         _                           => Err(io::Error::new(
                                              io::ErrorKind::InvalidInput,
-                                             "GELF: Packet too short, less than 2 bytes.",
-                                             None
-                                          )
-                                       )
+                                             "GELF: Packet too short, less than 2 bytes."))
     }
 }
 
@@ -56,8 +53,7 @@ fn unpack_uncompressed(packet: &[u8]) -> io::Result<String> {
     match str::from_utf8(packet) {
         Ok(payload) => Ok(payload.to_string()),
         Err(e)      => Err(io::Error::new(io::ErrorKind::InvalidInput,
-                                          "GELF: Unknown, non-UTF8 payload.",
-                                          None))
+                                          "GELF: Unknown, non-UTF8 payload."))
     }
 }
 
@@ -160,7 +156,7 @@ mod test_udp_receiver {
     use super::*;
     use std::net::{UdpSocket, SocketAddr, SocketAddrV4, SocketAddrV6, Ipv4Addr, Ipv6Addr};
     use std::sync::mpsc::channel;
-    use std::thread::Thread;
+    use std::thread;
 
     #[test]
     fn udp_receiver_smoke_test() {
@@ -170,7 +166,7 @@ mod test_udp_receiver {
         let (tx1, rx1) = channel();
         let json = r#"{"message":"foo","host":"bar","_utf8":"✓"}"#;
 
-        Thread::spawn(move|| {
+        thread::spawn(move|| {
             match UdpSocket::bind(client_ip) {
                 Ok(ref mut client) => {
                     rx1.recv().unwrap(); // Wait for signal main thread is listening.
@@ -188,7 +184,7 @@ mod test_udp_receiver {
                 let mut buf = [0; 1432];
                 match server.recv_from(&mut buf) {
                     Ok((n_read, _)) => {
-                        let packet = buf.as_slice().slice_to(n_read);
+                        let packet = &buf.as_slice()[..n_read];
                         match unpack(packet).unwrap() {
                             Partial(_) => assert!(false, "Expected 'Complete' result."),
                             Complete(s) => assert_eq!(json, s.as_slice())

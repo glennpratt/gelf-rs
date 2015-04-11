@@ -1,10 +1,9 @@
-#![feature(collections, core, io, slice_patterns, std_misc, test)]
+#![feature(collections, convert, core, io, slice_patterns, std_misc, test)]
 #![feature(old_io)]
 
 extern crate flate2;
 extern crate time;
-#[cfg(test)]
-extern crate rand;
+#[cfg(test)] extern crate rand;
 
 pub mod message;
 pub mod receiver;
